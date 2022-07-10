@@ -1,31 +1,29 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
+	"os/exec"
 	"path"
-	"syscall"
+	"time"
 
-	"github.com/kevinwylder/k/api"
-	"github.com/kevinwylder/k/files"
+	"github.com/kevinwylder/k/fs"
 )
 
 type UserSettings struct {
-	ServerAddr string
-	CacheDir   string
+	DataDir string
+	TmpDir string
 }
 
-func LoadFromSettings() (*UserSettings, error) {
+func NewUserSettings() (*UserSettings, error) {
 	var settings UserSettings
-	configDir, err := os.UserConfigDir()
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, fmt.Errorf("get config dir: %w", err)
+		return nil, fmt.Errorf("get home dir: %w", err)
 	}
-	configDir = path.Join(configDir, "k")
+	configDir := fmt.Sprintf("%s/.config/k", home)
 	if _, err := os.Stat(configDir); err != nil {
 		err = os.MkdirAll(configDir, 0o755)
 		if err != nil {
@@ -35,8 +33,7 @@ func LoadFromSettings() (*UserSettings, error) {
 	configFile := path.Join(configDir, "settings.json")
 	f, err := os.Open(configFile)
 	if err != nil {
-		settings.CacheDir = path.Join(configDir, "cache")
-		settings.ServerAddr = "127.0.0.1"
+		settings.DataDir = path.Join(configDir, "data")
 		f, err := os.Create(configFile)
 		if err != nil {
 			return nil, fmt.Errorf("create file: %w", err)
@@ -55,16 +52,52 @@ func LoadFromSettings() (*UserSettings, error) {
 }
 
 func main() {
-	settings, err := LoadFromSettings()
+	host, err := os.Hostname()
+	if err != nil {
+		log.Fatalf("get hostname: %v", err)
+	}
+	settings, err := NewUserSettings()
 	if err != nil {
 		log.Fatalf("load user settings: %v", err)
 	}
-	cache := files.NewCacheDir(settings.CacheDir)
-	client := api.NewClient(settings.ServerAddr, cache)
+
+	data, err := fs.NewStorageDir(host, settings.DataDir, settings.TmpDir)
+	if err != nil {
+		log.Fatalf("storage dir: %v", err)
+	}
+
+	/*
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	err = client.Check(ctx)
 	if err != nil {
 		log.Fatalf("Connect to server: %v", err)
+	}
+	*/
+
+	t := time.Now()
+	f, err := data.NewSegmentFile(t)
+	if err != nil {
+		log.Fatalf("segment file: %v", err)
+	}
+
+	cmd := exec.Command(os.Getenv("EDITOR"), f.Path)
+	cmd.Stdout = os.Stdout
+	cmd.Stdin = os.Stdin
+	cmd.Stderr = os.Stderr
+
+	err = cmd.Run()
+	if err != nil {
+		log.Fatalf("editor exited %v", err)
+	}
+
+	segment, err := f.Read()
+	if err != nil {
+		log.Fatalf("read segment: %v", err)
+	}
+
+	err = data.Write(t, segment, false)
+	if err != nil {
+		log.Fatalf("append segment: %v", err)
 	}
 }
