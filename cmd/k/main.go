@@ -13,8 +13,9 @@ import (
 )
 
 type UserSettings struct {
-	DataDir string
-	TmpDir string
+	DataDir  string
+	TmpDir   string
+	Hostname string
 }
 
 func NewUserSettings() (*UserSettings, error) {
@@ -34,6 +35,12 @@ func NewUserSettings() (*UserSettings, error) {
 	f, err := os.Open(configFile)
 	if err != nil {
 		settings.DataDir = path.Join(configDir, "data")
+		settings.TmpDir = path.Join(configDir, ".tmp")
+		host, err := os.Hostname()
+		if err != nil {
+			host = "unknown"
+		}
+		settings.Hostname = host
 		f, err := os.Create(configFile)
 		if err != nil {
 			return nil, fmt.Errorf("create file: %w", err)
@@ -52,27 +59,23 @@ func NewUserSettings() (*UserSettings, error) {
 }
 
 func main() {
-	host, err := os.Hostname()
-	if err != nil {
-		log.Fatalf("get hostname: %v", err)
-	}
 	settings, err := NewUserSettings()
 	if err != nil {
 		log.Fatalf("load user settings: %v", err)
 	}
 
-	data, err := fs.NewStorageDir(host, settings.DataDir, settings.TmpDir)
+	data, err := fs.NewStorageDir(settings.Hostname, settings.DataDir, settings.TmpDir)
 	if err != nil {
 		log.Fatalf("storage dir: %v", err)
 	}
 
 	/*
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-	err = client.Check(ctx)
-	if err != nil {
-		log.Fatalf("Connect to server: %v", err)
-	}
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer cancel()
+		err = client.Check(ctx)
+		if err != nil {
+			log.Fatalf("Connect to server: %v", err)
+		}
 	*/
 
 	t := time.Now()
