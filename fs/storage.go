@@ -103,6 +103,24 @@ func (f *SegmentFile) Read() (*bytes.Buffer, error) {
 	return ReadSegment(src)
 }
 
+type lockedReader struct {
+	done func()
+	*os.File
+}
+
+func (l *lockedReader) Close() error {
+	l.done()
+	return nil
+}
+
+func (d *StorageDir) Read(t time.Time) (io.ReadCloser, error) {
+	src, done, err := d.openExclusive(t)
+	if err != nil {
+		return nil, err
+	}
+	return &lockedReader{done, src}, nil
+}
+
 func (d *StorageDir) Write(t time.Time, data io.Reader, overwrite bool) error {
 	src, unlock, err := d.openExclusive(t)
 	if err != nil {

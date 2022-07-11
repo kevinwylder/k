@@ -1,21 +1,26 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
+	"syscall"
 	"time"
 
+	"github.com/kevinwylder/k/api"
 	"github.com/kevinwylder/k/fs"
 )
 
 type UserSettings struct {
 	DataDir  string
 	TmpDir   string
-	Hostname string
+	Name 	 string
+	Server 	 string
 }
 
 func NewUserSettings() (*UserSettings, error) {
@@ -40,7 +45,7 @@ func NewUserSettings() (*UserSettings, error) {
 		if err != nil {
 			host = "unknown"
 		}
-		settings.Hostname = host
+		settings.Name = host
 		f, err := os.Create(configFile)
 		if err != nil {
 			return nil, fmt.Errorf("create file: %w", err)
@@ -64,21 +69,25 @@ func main() {
 		log.Fatalf("load user settings: %v", err)
 	}
 
-	data, err := fs.NewStorageDir(settings.Hostname, settings.DataDir, settings.TmpDir)
+	data, err := fs.NewStorageDir(settings.Name, settings.DataDir, settings.TmpDir)
 	if err != nil {
 		log.Fatalf("storage dir: %v", err)
 	}
 
-	/*
-		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-		defer cancel()
-		err = client.Check(ctx)
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	t := time.Now()
+	var server *api.Client
+
+	if settings.Server != "" {
+		server = api.NewClient(settings.Server, data)
+		err = server.DownloadDay(ctx, t)
 		if err != nil {
 			log.Fatalf("Connect to server: %v", err)
 		}
-	*/
+	}
 
-	t := time.Now()
 	f, err := data.NewSegmentFile(t)
 	if err != nil {
 		log.Fatalf("segment file: %v", err)
@@ -99,8 +108,15 @@ func main() {
 		log.Fatalf("read segment: %v", err)
 	}
 
-	err = data.Write(t, segment, false)
-	if err != nil {
-		log.Fatalf("append segment: %v", err)
+	if server != nil {
+		err = server.UploadSegment(ctx, t, segment)
+		if err != nil {
+			log.Fatalf("upload segment: %v", err)
+		}
+	} else {
+		err = data.Write(t, segment, false)
+		if err != nil {
+			log.Fatalf("append segment: %v", err)
+		}
 	}
 }

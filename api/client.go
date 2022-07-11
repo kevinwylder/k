@@ -2,29 +2,34 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"time"
 
-	"github.com/kevinwylder/k/files"
+	"github.com/kevinwylder/k/fs"
 )
 
 type Client struct {
 	http  http.Client
 	addr  string
-	cache *files.CacheDir
+	data *fs.StorageDir
 }
 
-func NewClient(addr string, cache *files.CacheDir) *Client {
-	return &Client{addr: addr}
+func NewClient(addr string, data *fs.StorageDir) *Client {
+	return &Client{
+		addr: addr,
+		data: data,
+	}
 }
 
-func (c *Client) get(ctx context.Context, path string, dst interface{}) error {
-	url := fmt.Sprintf("http://%s/%s", c.addr, path)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+func (c *Client) day(ctx context.Context, t time.Time, segment io.Reader) error {
+	url := fmt.Sprintf("http://%s/day?t=%d", c.addr, t.Unix())
+	method := "GET"
+	if segment != nil {
+		method = "POST"
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, segment)
 	if err != nil {
 		return fmt.Errorf("get: %w", err)
 	}
@@ -34,26 +39,17 @@ func (c *Client) get(ctx context.Context, path string, dst interface{}) error {
 	}
 	defer res.Body.Close()
 
-	switch t := dst.(type) {
-	case nil:
-	case *os.File:
-		_, err = io.Copy(t, req.Body)
-		if err != nil {
-			return fmt.Errorf("read body: %w", err)
-		}
-	default:
-		err := json.NewDecoder(res.Body).Decode(t)
-		if err != nil {
-			return fmt.Errorf("parse response: %w", err)
-		}
+	err = c.data.Write(t, res.Body, true)
+	if err != nil {
+		return fmt.Errorf("write: %w", err)
 	}
 	return nil
 }
 
-func (c *Client) Check(ctx context.Context) error {
-	return c.get(ctx, "/ping", nil)
+func (c *Client) DownloadDay(ctx context.Context, t time.Time) error {
+	return c.day(ctx, t, nil)
 }
 
-func (c *Client) Upload(ctx context.Context, t time.Time) error {
-
+func (c *Client) UploadSegment(ctx context.Context, t time.Time, segment io.Reader) error {
+	return c.day(ctx, t, segment)
 }
